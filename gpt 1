@@ -1,0 +1,383 @@
+2. 데이터베이스 연결 설정
+config/config.js 파일을 만들어서 데이터베이스 연결 설정을 추가해줘.
+
+js
+코드 복사
+require('dotenv').config();
+
+module.exports = {
+  development: {
+    username: process.env.DB_USERNAME,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    host: process.env.DB_HOST,
+    dialect: 'mysql',
+  }
+};
+그리고 .env 파일을 만들어 데이터베이스 환경변수를 추가해줘.
+
+bash
+코드 복사
+DB_USERNAME=your_username
+DB_PASSWORD=your_password
+DB_NAME=your_database
+DB_HOST=localhost
+3. Sequelize 모델 정의
+주어진 ER 다이어그램에 따라 각 테이블에 해당하는 Sequelize 모델을 정의할게. 모델 파일들은 models/ 디렉토리에 저장해줘.
+
+
+
+
+
+
+
+
+3.1 User 모델 (models/user.js)
+js
+코드 복사
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/sequelize'); // Sequelize 연결
+
+const User = sequelize.define('User', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
+  username: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  email: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
+  },
+  password: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  }
+}, { timestamps: true });
+
+module.exports = User;
+
+
+
+
+
+
+
+
+3.2 Post 모델 (models/post.js)
+js
+코드 복사
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/sequelize');
+const User = require('./user');
+
+const Post = sequelize.define('Post', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
+  content: {
+    type: DataTypes.TEXT,
+    allowNull: false,
+  },
+  userId: {
+    type: DataTypes.INTEGER,
+    references: {
+      model: User,
+      key: 'id',
+    }
+  }
+}, { timestamps: true });
+
+User.hasMany(Post, { foreignKey: 'userId' });
+Post.belongsTo(User, { foreignKey: 'userId' });
+
+module.exports = Post;
+
+
+
+
+
+
+
+
+
+3.3 Comment 모델 (models/comment.js)
+js
+코드 복사
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/sequelize');
+const User = require('./user');
+const Post = require('./post');
+
+const Comment = sequelize.define('Comment', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
+  content: {
+    type: DataTypes.TEXT,
+    allowNull: false,
+  },
+  userId: {
+    type: DataTypes.INTEGER,
+    references: {
+      model: User,
+      key: 'id',
+    }
+  },
+  postId: {
+    type: DataTypes.INTEGER,
+    references: {
+      model: Post,
+      key: 'id',
+    }
+  }
+}, { timestamps: true });
+
+User.hasMany(Comment, { foreignKey: 'userId' });
+Comment.belongsTo(User, { foreignKey: 'userId' });
+
+Post.hasMany(Comment, { foreignKey: 'postId' });
+Comment.belongsTo(Post, { foreignKey: 'postId' });
+
+module.exports = Comment;
+
+
+
+
+
+
+
+
+
+3.4 Like 모델 (models/like.js)
+js
+코드 복사
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/sequelize');
+const User = require('./user');
+const Post = require('./post');
+
+const Like = sequelize.define('Like', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
+  userId: {
+    type: DataTypes.INTEGER,
+    references: {
+      model: User,
+      key: 'id',
+    }
+  },
+  postId: {
+    type: DataTypes.INTEGER,
+    references: {
+      model: Post,
+      key: 'id',
+    }
+  }
+}, { timestamps: true });
+
+User.hasMany(Like, { foreignKey: 'userId' });
+Like.belongsTo(User, { foreignKey: 'userId' });
+
+Post.hasMany(Like, { foreignKey: 'postId' });
+Like.belongsTo(Post, { foreignKey: 'postId' });
+
+module.exports = Like;
+
+
+
+
+
+
+
+4. 라우트 구현
+각 모델에 대한 CRUD API와 인증 시스템을 구현해보자. 인증은 JWT 기반으로 진행할 거야.
+
+4.1 회원가입 및 로그인 (routes/auth.js)
+js
+코드 복사
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const User = require('../models/user');
+
+const router = express.Router();
+const SECRET_KEY = process.env.JWT_SECRET;
+
+router.post('/register', async (req, res) => {
+  const { username, email, password } = req.body;
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  try {
+    const user = await User.create({ username, email, password: hashedPassword });
+    res.status(201).json(user);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const user = await User.findOne({ where: { email } });
+    if (!user || !await bcrypt.compare(password, user.password)) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign({ userId: user.id }, SECRET_KEY, { expiresIn: '1h' });
+    res.json({ token });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+module.exports = router;
+
+
+
+
+
+
+
+4.2 게시물 CRUD (routes/posts.js)
+js
+코드 복사
+const express = require('express');
+const Post = require('../models/post');
+const { authMiddleware } = require('../middleware/auth');
+
+const router = express.Router();
+
+// 게시물 작성
+router.post('/', authMiddleware, async (req, res) => {
+  const { content } = req.body;
+  const userId = req.user.userId;
+
+  try {
+    const post = await Post.create({ content, userId });
+    res.status(201).json(post);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// 게시물 조회
+router.get('/', async (req, res) => {
+  try {
+    const posts = await Post.findAll();
+    res.json(posts);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// 게시물 수정
+router.put('/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { content } = req.body;
+  const userId = req.user.userId;
+
+  try {
+    const post = await Post.findByPk(id);
+    if (post.userId !== userId) {
+      return res.status(403).json({ message: 'You can only edit your own posts' });
+    }
+
+    post.content = content;
+    await post.save();
+    res.json(post);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// 게시물 삭제
+router.delete('/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.userId;
+
+  try {
+    const post = await Post.findByPk(id);
+    if (post.userId !== userId) {
+      return res.status(403).json({ message: 'You can only delete your own posts' });
+    }
+
+    await post.destroy();
+    res.json({ message: 'Post deleted' });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+module.exports = router;
+
+
+
+
+
+
+
+4.3 미들웨어 (middleware/auth.js)
+js
+코드 복사
+const jwt = require('jsonwebtoken');
+const SECRET_KEY = process.env.JWT_SECRET;
+
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ message: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(403).json({ message: 'Invalid token' });
+  }
+};
+
+module.exports = { authMiddleware };
+5. 서버 설정 (index.js)
+모든 라우트를 Express 서버에 연결해주고, Sequelize로 데이터베이스와 동기화시켜.
+
+js
+코드 복사
+require('dotenv').config();
+const express = require('express');
+const sequelize = require('./config/sequelize');
+const authRoutes = require('./routes/auth');
+const postRoutes = require('./routes/posts');
+
+const app = express();
+app.use(express.json());
+
+// 라우트 설정
+app.use('/auth', authRoutes);
+app.use('/posts', postRoutes);
+
+const PORT = process.env.PORT || 3000;
+
+// 데이터베이스 동기화 후 서버 시작
+sequelize.sync().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}).catch(err => {
+  console.error('Unable to connect to the database:', err);
+});
+6. 데이터베이스 동기화
+모델과 데이터베이스를 동기화시키는 작업을 해줘. sequelize.sync()가 이 역할을 해줄 거야.
